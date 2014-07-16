@@ -13,7 +13,7 @@
                  }, !obj:pylearn2.models.mlp.Softmax {
                      layer_name: 'y',
                      n_classes: 10,
-                     irange: 0.
+                     irange: 0
                  }
                 ],
         nvis: 784,
@@ -21,6 +21,14 @@
     algorithm: !obj:pylearn2.training_algorithms.mc.MC {
         batch_size: 5000,
         learning_rate: .01,
+        stdev: 0.0005,
+        temp: 0.002,
+        update_entries:
+           {
+                'method' : 'by_num',
+                'num_entries' : 10,
+                'fraction_entries': 0.20
+           },
         monitoring_dataset:
             {
                 'train' : *train,
@@ -43,7 +51,7 @@
                     N: 10000
                 },
                 !obj:pylearn2.termination_criteria.EpochCounter {
-                    max_epochs: 30
+                    max_epochs: 20
                 }
             ]
         }
