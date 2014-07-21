@@ -58,7 +58,7 @@ class MC(TrainingAlgorithm):
                  train_iteration_mode=None, batches_per_iter=None,
                  theano_function_mode=None, monitoring_costs=None,
                  seed=[2012, 10, 5], temp=0.2, k=1, stdev=0.09, 
-                 update_entries=None):
+                 update_entries=None, layer_by_layer=False):
 
         self.learning_rule = learning_rule
         self.learning_rate = sharedX(learning_rate, 'learning_rate')
@@ -121,6 +121,9 @@ class MC(TrainingAlgorithm):
             
         self.update_method = update_entries["method"]
                 
+
+        self.layer_by_layer = layer_by_layer
+        self.layer_idx = 0
 
 
     def setup(self, model, dataset):
@@ -202,9 +205,31 @@ class MC(TrainingAlgorithm):
         # Make sure none of the parameters have bad values
         self._check_param_values(self.params)
         
+
+
+        # option to only update one layer each epoch        
+        if (self.layer_by_layer):
+            
+            current_layer = self.model.layers[self.layer_idx]
+            
+            # train the parameters of the current layer
+            self._train_params(current_layer.get_params())
+            
+            # update the layer index
+            self.layer_idx = (self.layer_idx+1)%(len(self.model.layers))
+        
+    
+        else:
+            self._train_params(self.params)
+            
+                
+
+            
+        """
         # Random displacement
         old_params = dict()
         for param in self.params:
+
             param_value = param.get_value(borrow=True)
 
             # save a copy of the old value
@@ -227,7 +252,7 @@ class MC(TrainingAlgorithm):
                 param.set_value(old_params[param.name])
             
         self._check_param_values(self.params)
-
+        """
 
     def continue_learning(self, model):
         """
@@ -510,3 +535,34 @@ class MC(TrainingAlgorithm):
                 self.recorded_cost.append(self.energy)
                 self.num_rejects = self.num_rejects+1
                 return False
+
+
+    def _train_params(self, params):
+
+        # Random displacement
+        old_params = dict()
+
+        for param in params:
+
+            param_value = param.get_value(borrow=True)
+
+            # save a copy of the old value
+            old_params[param.name]=param_value
+
+            # use displacement of a subset of the entries to get a
+            # matrix of new weight values for the parameter
+            sample_matrix = self.sample_matrix_dict[param.name]
+            new_value = as_floatX(self.updates_dict[param.name]\
+                                      (as_floatX(param_value), sample_matrix))
+            
+            # updates the value of the parameter and the cost 
+            param.set_value(new_value) 
+            
+            
+        #  Accept/Reject by Metropolis
+        if (not self._metropolis_accept()):
+            # if reject by metropolis, set back to the value in the old_params
+            for param in params:
+                param.set_value(old_params[param.name])
+            
+        self._check_param_values(params)

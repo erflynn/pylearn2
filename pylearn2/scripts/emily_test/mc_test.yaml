@@ -8,7 +8,7 @@
     model: !obj:pylearn2.models.mlp.MLP {
         layers: [ !obj:pylearn2.models.mlp.Sigmoid {
                      layer_name: 'h0',
-                     dim: 500,
+                     dim: 20,
                      sparse_init: 15
                  }, !obj:pylearn2.models.mlp.Softmax {
                      layer_name: 'y',
@@ -21,13 +21,14 @@
     algorithm: !obj:pylearn2.training_algorithms.mc.MC {
         batch_size: 5000,
         learning_rate: .01,
-        stdev: 0.0005,
-        temp: 0.002,
+        stdev: 0.005,
+        temp: 0.0008,
+        layer_by_layer: 'True',
         update_entries:
            {
-                'method' : 'by_num',
+                'method' : 'by_fraction',
                 'num_entries' : 10,
-                'fraction_entries': 0.20
+                'fraction_entries': 1.00
            },
         monitoring_dataset:
             {
@@ -48,10 +49,10 @@
                 !obj:pylearn2.termination_criteria.MonitorBased {
                     channel_name: "valid_y_misclass",
                     prop_decrease: 0.,
-                    N: 10000
+                    N: 50000
                 },
                 !obj:pylearn2.termination_criteria.EpochCounter {
-                    max_epochs: 20
+                    max_epochs: 2
                 }
             ]
         }
