@@ -22,8 +22,10 @@
         batch_size: 5000,
         learning_rate: .01,
         stdev: 0.005,
-        temp: 0.0008,
+        temp: 0.0004,
         layer_by_layer: 'True',
+        train_param_batches: 'True',
+        num_param_batches: 5,
         update_entries:
            {
                 'method' : 'by_fraction',
@@ -52,7 +54,7 @@
                     N: 50000
                 },
                 !obj:pylearn2.termination_criteria.EpochCounter {
-                    max_epochs: 2
+                    max_epochs: 1000
                 }
             ]
         }

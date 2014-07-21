@@ -58,7 +58,8 @@ class MC(TrainingAlgorithm):
                  train_iteration_mode=None, batches_per_iter=None,
                  theano_function_mode=None, monitoring_costs=None,
                  seed=[2012, 10, 5], temp=0.2, k=1, stdev=0.09, 
-                 update_entries=None, layer_by_layer=False):
+                 update_entries=None, layer_by_layer=False,
+                 train_param_batches=False, num_param_batches=1):
 
         self.learning_rule = learning_rule
         self.learning_rate = sharedX(learning_rate, 'learning_rate')
@@ -124,6 +125,10 @@ class MC(TrainingAlgorithm):
 
         self.layer_by_layer = layer_by_layer
         self.layer_idx = 0
+
+        self.train_param_batches = train_param_batches
+        self.num_param_batches = num_param_batches
+        self.batch_idx = 0
 
 
     def setup(self, model, dataset):
@@ -204,8 +209,6 @@ class MC(TrainingAlgorithm):
 
         # Make sure none of the parameters have bad values
         self._check_param_values(self.params)
-        
-
 
         # option to only update one layer each epoch        
         if (self.layer_by_layer):
@@ -216,43 +219,11 @@ class MC(TrainingAlgorithm):
             self._train_params(current_layer.get_params())
             
             # update the layer index
-            self.layer_idx = (self.layer_idx+1)%(len(self.model.layers))
+            self.layer_idx = (self.layer_idx+1)%(len(self.model.layers))        
         
-    
         else:
             self._train_params(self.params)
-            
-                
 
-            
-        """
-        # Random displacement
-        old_params = dict()
-        for param in self.params:
-
-            param_value = param.get_value(borrow=True)
-
-            # save a copy of the old value
-            old_params[param.name]=param_value
-
-            # use displacement of a subset of the entries to get a
-            # matrix of new weight values for the parameter
-            sample_matrix = self.sample_matrix_dict[param.name]
-            new_value = as_floatX(self.updates_dict[param.name]\
-                                      (as_floatX(param_value), sample_matrix))
-            
-            # updates the value of the parameter and the cost 
-            param.set_value(new_value) 
-            
-            
-        #  Accept/Reject by Metropolis
-        if (not self._metropolis_accept()):
-            # if reject by metropolis, set back to the value in the old_params
-            for param in self.params:
-                param.set_value(old_params[param.name])
-            
-        self._check_param_values(self.params)
-        """
 
     def continue_learning(self, model):
         """
@@ -420,7 +391,7 @@ class MC(TrainingAlgorithm):
         updated.
 
         """
-
+        
         self.sample_matrix_dict = dict()
         for param in self.params:
             value = param.get_value(borrow=True)
@@ -445,6 +416,7 @@ class MC(TrainingAlgorithm):
             z = rv_p[0][0:x]
             f = function([x], z)
 
+
             # run the function to get indices based on the info
             # provided in the YAML file
             if self.update_method == "by_num":
@@ -453,24 +425,83 @@ class MC(TrainingAlgorithm):
                 indices = f(int(self.fraction_entries*num_entries))
             else: # other cases??
                 indices = f(num_entries)
-            
-            # create a new matrix containing only zeros
-            sample_matrix = np.zeros(value.shape)
-            
-            # place in 1s in the new matrix at the elements
-            # corresponded to the randomly generated indices, this
-            # indicates these elements should be updated
-            for index in indices:
-                row = int(index)/cols
-                col = int(index)%cols
-        
-                if rows == 1:
-                    sample_matrix[col] = 1
-                else:
-                    sample_matrix[row][col] = 1
 
-            self.sample_matrix_dict[param.name] = sample_matrix
+                
+
+            #######################################################
+            # batch training option:
+            #
+            # divide up the permuted entries into n blocks (n is the
+            # number of batches) and create a sample matrix for each
+            # block of entries, store the sample matrices as a list
+            # in the sample matrix dictionary.
+            ########################################################
+            if self.train_param_batches:
+                
+                # grab the entire list of permuted entries
+                indices = f(num_entries)
+                
+                # calculate the block size
+                assert(self.num_param_batches >= 1)
+                block_size = int(num_entries/self.num_param_batches)
+                
+                # for each of the batches, grab the next block of
+                # randomly permuted indices and fill in the matrix
+                matrix_list = []
+                for i in range(0, self.num_param_batches-1):
+                    current_indices = indices[(i*block_size):((i+1)*block_size)]
+                    
+                    # append the matrix to the list of sample matrices
+                    matrix_list.append(self._create_sample_matrix( \
+                            rows, cols, current_indices))
+
+                # create the last matrix from the last block
+                current_indices = indices[((self.num_param_batches-1) \
+                                                *block_size):]
+                matrix_list.append(self._create_sample_matrix(\
+                        rows, cols, current_indices))
+
+                # place the list in the dictionary at the entry
+                # associated with the parameter
+                self.sample_matrix_dict[param.name] = matrix_list
+        
+
+            # otherwise, train normally
+            else:
+                self.sample_matrix_dict[param.name] = \
+                    [self._create_sample_matrix(rows, cols, indices)]
             
+
+            
+    def _create_sample_matrix(self, rows, cols, indices):
+        """
+        Helper function that returns a sample matrix with the given
+        dimensions with 1s in the elements with the given indices.
+
+        """
+
+        # create a new matrix containing only zeros
+        # account for different dimension possibilities
+        if (cols == 1 and rows == 1):
+            sample_matrix = np.zeros(())
+        elif rows == 1:
+            sample_matrix = np.zeros((cols,))
+        else:
+            sample_matrix = np.zeros((rows, cols))
+
+        # place in 1s in the new matrix at the elements that
+        # correspond to the generated indices, this indicates these
+        # elements should be updated
+        for index in indices:
+            row = int(index)/cols
+            col = int(index)%cols
+            
+            if rows == 1:
+                sample_matrix[col] = 1
+            else:
+                sample_matrix[row][col] = 1
+                
+        return sample_matrix
 
 
     def _metropolis_accept(self):
@@ -538,6 +569,11 @@ class MC(TrainingAlgorithm):
 
 
     def _train_params(self, params):
+        """
+        Helper function to train the given parameters. Called by the
+        train() method.
+
+        """
 
         # Random displacement
         old_params = dict()
@@ -551,7 +587,7 @@ class MC(TrainingAlgorithm):
 
             # use displacement of a subset of the entries to get a
             # matrix of new weight values for the parameter
-            sample_matrix = self.sample_matrix_dict[param.name]
+            sample_matrix = self.sample_matrix_dict[param.name][self.batch_idx]
             new_value = as_floatX(self.updates_dict[param.name]\
                                       (as_floatX(param_value), sample_matrix))
             
@@ -566,3 +602,8 @@ class MC(TrainingAlgorithm):
                 param.set_value(old_params[param.name])
             
         self._check_param_values(params)
+
+        # update the batch index if we are training the params in
+        # batches
+        if (self.train_param_batches):
+            self.batch_idx = (self.batch_idx+1)%(self.num_param_batches)
